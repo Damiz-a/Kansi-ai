@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── CSS custom properties ──────────────────────────────────────── */
+:root {
+  --brown-600: #6B3A2A;
+  --brown-500: #8B5E3C;
+  --brown-400: #B8855A;
+  --brown-100: #F5E9DF;
+  --brown-50:  #FDF9F6;
+  --white:     #FFFFFF;
+}
+
+/* ─── Base resets ────────────────────────────────────────────────── */
+@layer base {
+  html { scroll-behavior: smooth; }
+
+  body {
+    @apply bg-white text-brown-800;
+    font-family: var(--font-dm-sans, system-ui, sans-serif);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-playfair, Georgia, serif);
+  }
+}
+
+/* ─── Component classes ──────────────────────────────────────────── */
+@layer components {
+
+  /* Card: white surface with subtle border and shadow */
+  .card {
+    @apply bg-white border border-brown-100 rounded-3xl shadow-sm p-8;
+  }
+
+  /* Primary button: solid deep-brown fill */
+  .btn-primary {
+    @apply inline-flex items-center justify-center
+           bg-brown-600 hover:bg-brown-700
+           text-white font-semibold
+           py-3 px-6 rounded-xl
+           shadow-md hover:shadow-lg
+           transition-all duration-200
+           hover:-translate-y-0.5
+           active:translate-y-0;
+  }
+
+  /* Outline button: brown border on white */
+  .btn-outline {
+    @apply inline-flex items-center justify-center
+           border-2 border-brown-300 text-brown-600
+           hover:bg-brown-50 hover:border-brown-500
+           font-semibold
+           py-3 px-6 rounded-xl
+           transition-all duration-200;
+  }
+
+  /* Glassmorphism (used sparingly for hero overlays) */
+  .glass {
+    @apply bg-white/70 backdrop-blur-xl border border-white/60 rounded-3xl shadow-xl;
+  }
+
+  /* Section helpers */
+  .hero     { @apply text-center py-20; }
+  .section  { @apply py-16 px-4; }
+}

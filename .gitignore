@@ -1,7 +1,14 @@
-# Ignore sensitive files
+# Environment / secrets
 .env
+*.secret
+*.token
+*.credentials
+
+# Databases
 *.db
 *.sqlite3
+
+# Certificates & keys
 *.p12
 *.pem
 *.key
@@ -11,21 +18,36 @@
 *.p7b
 *.jks
 *.keystore
-*.properties
-*.json
-*.yaml
-*.yml
+
+# Config (local overrides — not tracked)
 *.ini
 *.cfg
 *.conf
-*.secret
-*.token
-*.credentials
+
+# Logs & temp
 *.log
 *.bak
 *.tmp
 *.swp
 *.swo
-*.DS_Store
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
 *.pyc
 __pycache__/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+.next/
+out/
+
+# IDE
+.idea/
+venv/

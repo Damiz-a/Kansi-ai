@@ -1,8 +1,8 @@
 """
-Kansi AI - Flask Web Application
-==================================
-Main application with user authentication, profile management,
-password reset, admin security views, and AI-powered text analysis.
+Kansi AI - Hybrid Flask API Backend
+=====================================
+Pure REST API server. UI is served by the Next.js frontend.
+Authentication: Flask session-based auth (legacy) OR Clerk JWT Bearer tokens.
 """
 
 import json
@@ -14,10 +14,8 @@ from datetime import timedelta
 from functools import wraps
 
 import joblib
-from flask import (
-    Flask, abort, flash, g, jsonify, redirect, render_template,
-    request, session, url_for
-)
+from flask import Flask, abort, g, jsonify, redirect, request, session
+from flask_cors import CORS
 from flask_wtf.csrf import CSRFError, CSRFProtect, generate_csrf
 
 from config import BaseConfig, TestConfig
@@ -56,6 +54,12 @@ from security import (
     verify_webhook_signature,
 )
 
+# Optional Clerk JWT validation (requires PyJWT)
+try:
+    import jwt as pyjwt
+    _PYJWT_AVAILABLE = True
+except ImportError:
+    _PYJWT_AVAILABLE = False
 
 csrf = CSRFProtect()
 
@@ -65,6 +69,10 @@ CHAT_STARTERS = [
     "I need help making sense of how I have been feeling this week."
 ]
 
+
+# ---------------------------------------------------------------------------
+# App factory
+# ---------------------------------------------------------------------------
 
 def create_app():
     app = Flask(__name__)
@@ -79,6 +87,10 @@ def create_app():
 
     configure_logging(app)
     csrf.init_app(app)
+
+    # CORS: allow the Next.js frontend to call Flask API routes
+    CORS(app, origins=app.config['TRUSTED_ORIGINS'], supports_credentials=True)
+
     init_db()
 
     model_dir = os.path.join(os.path.dirname(__file__), 'models')
@@ -94,18 +106,26 @@ def create_app():
     return app
 
 
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
 def configure_logging(app):
     app.logger.setLevel(getattr(logging, app.config['SECURITY_LOG_LEVEL'], logging.INFO))
     if not any(isinstance(f, SecretRedactionFilter) for f in app.logger.filters):
         app.logger.addFilter(SecretRedactionFilter())
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 def is_api_request():
     return request.path.startswith('/api/') or request.is_json
 
 
 def log_security_event(app, level, message, **metadata):
-    redacted = {key: value for key, value in metadata.items() if key not in {'token', 'password', 'text'}}
+    redacted = {k: v for k, v in metadata.items() if k not in {'token', 'password', 'text'}}
     getattr(app.logger, level)(f"{message} | {json.dumps(redacted, sort_keys=True)}")
 
 
@@ -134,16 +154,83 @@ def record_rate_limit_hit(event_type, subject=None):
     )
 
 
+# ---------------------------------------------------------------------------
+# Clerk JWT validation
+# ---------------------------------------------------------------------------
+
+def verify_clerk_jwt(token: str):
+    """Validate a Clerk-issued JWT and return a local user dict, or None."""
+    if not _PYJWT_AVAILABLE:
+        return None
+    jwks_url = app.config.get('CLERK_JWKS_URL', '')
+    if not jwks_url:
+        return None
+    try:
+        jwks_client = pyjwt.PyJWKClient(jwks_url, cache_keys=True)
+        signing_key = jwks_client.get_signing_key_from_jwt(token)
+        payload = pyjwt.decode(
+            token,
+            signing_key.key,
+            algorithms=['RS256'],
+            options={'verify_aud': False},
+        )
+        email = payload.get('email', '')
+        first = payload.get('first_name') or payload.get('given_name', '')
+        last = payload.get('last_name') or payload.get('family_name', '')
+        full_name = f"{first} {last}".strip() or email.split('@')[0]
+        clerk_id = payload.get('sub', '')
+
+        # Look up or lazily create a matching row in the local SQLite DB
+        user = get_user_by_email(email)
+        if not user and email:
+            user = create_user(
+                email=email,
+                password=None,
+                full_name=full_name,
+                auth_provider='clerk',
+                google_id=clerk_id,
+            )
+        return user
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Auth decorators
+# ---------------------------------------------------------------------------
+
 def login_required(view):
+    """Session-based auth only (legacy Flask users)."""
     @wraps(view)
     def wrapped(*args, **kwargs):
         if not g.user:
-            record_security_event('access_denied', subject='anonymous', ip_address=get_request_ip(), metadata={'path': request.path})
-            if is_api_request():
-                abort(401)
-            flash('Please log in to access this page.', 'warning')
-            return redirect(url_for('login'))
+            record_security_event('access_denied', subject='anonymous',
+                                  ip_address=get_request_ip(), metadata={'path': request.path})
+            abort(401)
         return view(*args, **kwargs)
+    return wrapped
+
+
+def api_auth_required(view):
+    """Accept session auth OR a Clerk Bearer JWT — for all /api/* routes."""
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        # 1. Session-based (existing Flask users)
+        if g.user:
+            return view(*args, **kwargs)
+
+        # 2. Clerk Bearer JWT (Next.js frontend)
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]
+            clerk_user = verify_clerk_jwt(token)
+            if clerk_user:
+                g.user = clerk_user
+                return view(*args, **kwargs)
+
+        record_security_event('access_denied', subject='anonymous',
+                              ip_address=get_request_ip(), metadata={'path': request.path})
+        return jsonify({'error': 'Authentication required.'}), 401
     return wrapped
 
 
@@ -163,8 +250,11 @@ def admin_required(view):
     return wrapped
 
 
+# ---------------------------------------------------------------------------
+# ML helpers
+# ---------------------------------------------------------------------------
+
 def clean_input_text(text):
-    """Normalize user text before vectorization."""
     cleaned = text.lower()
     cleaned = re.sub(r'http\S+|www\.\S+', '', cleaned)
     cleaned = re.sub(r'@\w+', '', cleaned)
@@ -175,7 +265,6 @@ def clean_input_text(text):
 
 
 def analyze_text_input(text):
-    """Run the local model and return structured analysis data."""
     cleaned = clean_input_text(text)
     features = app.config['TFIDF'].transform([cleaned])
     model = app.config['MODEL']
@@ -207,7 +296,8 @@ def detect_emotional_signals(text):
         'lonely': ['alone', 'lonely', 'isolated', 'disconnected'],
         'tired': ['tired', 'exhausted', 'drained', 'sleep', 'insomnia'],
     }
-    return [signal for signal, keywords in signal_map.items() if any(keyword in lowered for keyword in keywords)]
+    return [s for s, keywords in signal_map.items()
+            if any(k in lowered for k in keywords)]
 
 
 def has_high_risk_language(text):
@@ -231,7 +321,8 @@ def build_chatbot_reply(user_name, text, analysis):
             opening +
             "What you wrote sounds urgent, and I want to respond carefully. "
             "Please contact local emergency support now or reach out to Samaritans at 116 123 if you are in the UK. "
-            "If you are in the US or Canada, call or text 988. If texting feels easier, message a trusted person and tell them you need immediate support."
+            "If you are in the US or Canada, call or text 988. "
+            "If texting feels easier, message a trusted person and tell them you need immediate support."
         )
         suggestions = [
             "Move closer to another person or call someone you trust right now.",
@@ -266,7 +357,8 @@ def build_chatbot_reply(user_name, text, analysis):
         ]
     else:
         guidance = (
-            f"My screening model did not find strong depressive indicators in this message and estimated {confidence}% confidence. "
+            f"My screening model did not find strong depressive indicators in this message "
+            f"and estimated {confidence}% confidence. "
             "Even so, your experience still matters, and we can keep unpacking it together."
         )
         status = "Supportive check-in"
@@ -282,6 +374,10 @@ def build_chatbot_reply(user_name, text, analysis):
     )
     return opening + reflection + guidance + closing, suggestions, status
 
+
+# ---------------------------------------------------------------------------
+# Security hooks
+# ---------------------------------------------------------------------------
 
 def register_security_hooks(app):
     @app.before_request
@@ -305,169 +401,150 @@ def register_security_hooks(app):
         allowed_origins = set(app.config['TRUSTED_ORIGINS'])
         allowed_origins.add(request.host_url.rstrip('/'))
         if origin not in allowed_origins:
-            record_security_event('origin_blocked', subject=request.endpoint, ip_address=get_request_ip(), metadata={'origin': origin})
+            record_security_event('origin_blocked', subject=request.endpoint,
+                                  ip_address=get_request_ip(), metadata={'origin': origin})
             abort(403)
 
     @app.after_request
     def add_security_headers(response):
-        origin = request.headers.get('Origin')
-        allowed_origins = set(app.config['TRUSTED_ORIGINS'])
-        allowed_origins.add(request.host_url.rstrip('/'))
-        if origin and origin in allowed_origins:
-            response.headers['Access-Control-Allow-Origin'] = origin
-            response.headers['Vary'] = 'Origin'
-
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'DENY'
         response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
         response.headers['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=()'
-        response.headers['Cross-Origin-Opener-Policy'] = 'same-origin'
-        response.headers['Cross-Origin-Resource-Policy'] = 'same-origin'
         response.headers['Cache-Control'] = 'no-store' if request.path.startswith('/api/') else 'no-cache'
-        response.headers['Content-Security-Policy'] = (
-            "default-src 'self'; "
-            "img-src 'self' data:; "
-            "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; "
-            "font-src 'self' https://fonts.gstatic.com; "
-            "script-src 'self'; "
-            "connect-src 'self'; "
-            "base-uri 'self'; "
-            "form-action 'self'; "
-            "frame-ancestors 'none'"
-        )
         if app.config['SESSION_COOKIE_SECURE']:
             response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
         return response
 
-    @app.context_processor
-    def inject_template_defaults():
-        return {
-            'user': getattr(g, 'user', None),
-            'csrf_token_value': generate_csrf(),
-            'site_url': app.config['SITE_URL'] or request.url_root.rstrip('/'),
-            'preview_image_url': f"{app.config['SITE_URL'] or request.url_root.rstrip('/')}{url_for('static', filename='img/social-preview.svg')}",
-            'demo_google_auth_enabled': app.config['ENABLE_DEMO_GOOGLE_AUTH'],
-        }
 
-
-def render_error(status_code, title, message):
-    if is_api_request():
-        return jsonify({'error': message}), status_code
-    return render_template('error.html', status_code=status_code, title=title, message=message), status_code
-
+# ---------------------------------------------------------------------------
+# Error handlers
+# ---------------------------------------------------------------------------
 
 def register_error_handlers(app):
     @app.errorhandler(CSRFError)
     def handle_csrf_error(error):
-        record_security_event('csrf_rejected', subject=request.endpoint, ip_address=get_request_ip(), metadata={'reason': error.description})
-        return render_error(400, 'Request blocked', 'Your session token was missing or invalid. Please refresh the page and try again.')
+        record_security_event('csrf_rejected', subject=request.endpoint,
+                              ip_address=get_request_ip(), metadata={'reason': error.description})
+        return jsonify({'error': 'CSRF token missing or invalid.'}), 400
 
     @app.errorhandler(400)
     def bad_request(_error):
-        return render_error(400, 'Bad request', 'The request could not be processed safely.')
+        return jsonify({'error': 'Bad request.'}), 400
 
     @app.errorhandler(401)
     def unauthorized(_error):
-        return render_error(401, 'Unauthorized', 'Please log in to continue.')
+        return jsonify({'error': 'Authentication required.'}), 401
 
     @app.errorhandler(403)
     def forbidden(_error):
-        return render_error(403, 'Forbidden', 'You do not have permission to access this resource.')
+        return jsonify({'error': 'Forbidden.'}), 403
 
     @app.errorhandler(404)
     def not_found(_error):
-        return render_error(404, 'Not found', 'The page you requested could not be found.')
+        return jsonify({'error': 'Not found.'}), 404
 
     @app.errorhandler(429)
     def too_many_requests(_error):
-        return render_error(429, 'Too many requests', 'Too many attempts were detected. Please wait and try again.')
+        return jsonify({'error': 'Too many requests. Please wait and try again.'}), 429
 
     @app.errorhandler(500)
     def internal_error(error):
-        log_security_event(app, 'error', 'Internal server error', path=request.path, endpoint=request.endpoint, error=str(error))
-        return render_error(500, 'Server error', 'Something went wrong. Please try again in a moment.')
+        log_security_event(app, 'error', 'Internal server error',
+                           path=request.path, endpoint=request.endpoint, error=str(error))
+        return jsonify({'error': 'Internal server error.'}), 500
 
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
 
 def register_routes(app):
+
+    # --- Health / root ---------------------------------------------------
+
     @app.route('/')
     def index():
-        if g.user:
-            return redirect(url_for('dashboard'))
-        return render_template('index.html')
+        frontend_url = app.config.get('FRONTEND_URL', 'http://localhost:3000')
+        return redirect(frontend_url, 302)
 
-    @app.route('/register', methods=['GET', 'POST'])
-    def register():
-        if request.method == 'POST':
-            try:
-                email = validate_email(request.form.get('email', ''))
-                password = validate_password(request.form.get('password', ''))
-                confirm_password = request.form.get('confirm_password', '')
-                full_name = validate_full_name(request.form.get('full_name', ''))
-            except ValidationError as exc:
-                flash(str(exc), 'error')
-                return render_template('register.html'), 400
+    @app.route('/health')
+    def health():
+        return jsonify({'status': 'ok', 'service': 'kansi-api'})
 
-            if password != confirm_password:
-                flash('Passwords do not match.', 'error')
-                return render_template('register.html'), 400
+    # --- Auth (JSON — used by legacy clients; Next.js uses Clerk) --------
 
-            if rate_limit_exceeded('register_attempt', limit=5, window_seconds=900, subject=email):
-                abort(429)
+    @csrf.exempt
+    @app.route('/api/auth/register', methods=['POST'])
+    def api_register():
+        data = request.get_json(silent=True) or {}
+        try:
+            email = validate_email(data.get('email', ''))
+            password = validate_password(data.get('password', ''))
+            full_name = validate_full_name(data.get('full_name', ''))
+        except ValidationError as exc:
+            return jsonify({'error': str(exc)}), 400
 
-            if get_user_by_email(email):
-                record_rate_limit_hit('register_attempt', subject=email)
-                flash('An account with this email already exists.', 'error')
-                return render_template('register.html'), 400
+        if data.get('password') != data.get('confirm_password'):
+            return jsonify({'error': 'Passwords do not match.'}), 400
 
-            user = create_user(email, password, full_name)
-            if user:
-                session.clear()
-                session['user_id'] = user['id']
-                session.permanent = True
-                flash('Account created successfully. Welcome to Kansi AI.', 'success')
-                return redirect(url_for('dashboard'))
+        if rate_limit_exceeded('register_attempt', limit=5, window_seconds=900, subject=email):
+            abort(429)
 
-            flash('Registration failed. Please try again.', 'error')
-            return render_template('register.html'), 400
+        if get_user_by_email(email):
+            record_rate_limit_hit('register_attempt', subject=email)
+            return jsonify({'error': 'An account with this email already exists.'}), 400
 
-        return render_template('register.html')
+        user = create_user(email, password, full_name)
+        if user:
+            session.clear()
+            session['user_id'] = user['id']
+            session.permanent = True
+            return jsonify({'success': True, 'user': {'id': user['id'], 'email': email, 'full_name': full_name}})
+        return jsonify({'error': 'Registration failed. Please try again.'}), 400
 
-    @app.route('/login', methods=['GET', 'POST'])
-    def login():
-        if request.method == 'POST':
-            try:
-                email = validate_email(request.form.get('email', ''))
-            except ValidationError as exc:
-                flash(str(exc), 'error')
-                return render_template('login.html'), 400
+    @csrf.exempt
+    @app.route('/api/auth/login', methods=['POST'])
+    def api_login():
+        data = request.get_json(silent=True) or {}
+        try:
+            email = validate_email(data.get('email', ''))
+        except ValidationError as exc:
+            return jsonify({'error': str(exc)}), 400
 
-            password = request.form.get('password', '')
-            if rate_limit_exceeded('login_failed', limit=5, window_seconds=900, subject=email):
-                log_security_event(app, 'warning', 'Login rate limit exceeded', email=email, ip=get_request_ip())
-                abort(429)
+        password = data.get('password', '')
+        if rate_limit_exceeded('login_failed', limit=5, window_seconds=900, subject=email):
+            log_security_event(app, 'warning', 'Login rate limit exceeded',
+                               email=email, ip=get_request_ip())
+            abort(429)
 
-            user = authenticate_user(email, password)
-            if user:
-                session.clear()
-                session['user_id'] = user['id']
-                session.permanent = True
-                flash(f'Welcome back, {user["full_name"]}.', 'success')
-                return redirect(url_for('dashboard'))
+        user = authenticate_user(email, password)
+        if user:
+            session.clear()
+            session['user_id'] = user['id']
+            session.permanent = True
+            return jsonify({'success': True, 'user': {'id': user['id'], 'full_name': user['full_name']}})
 
-            record_rate_limit_hit('login_failed', subject=email)
-            flash('Invalid email or password.', 'error')
-            return render_template('login.html'), 400
+        record_rate_limit_hit('login_failed', subject=email)
+        return jsonify({'error': 'Invalid email or password.'}), 401
 
-        return render_template('login.html')
+    @csrf.exempt
+    @app.route('/api/auth/logout', methods=['POST'])
+    def api_logout():
+        session.clear()
+        return jsonify({'success': True})
 
-    @app.route('/auth/google', methods=['POST'])
+    @csrf.exempt
+    @app.route('/api/auth/google', methods=['POST'])
     def google_auth():
         if not app.config['ENABLE_DEMO_GOOGLE_AUTH']:
             abort(403)
         data = request.get_json(silent=True) or {}
         try:
             email = validate_email(data.get('email', ''))
-            full_name = validate_full_name(data.get('name') or normalize_email(email).split('@')[0].replace('.', ' '))
+            full_name = validate_full_name(
+                data.get('name') or normalize_email(email).split('@')[0].replace('.', ' ')
+            )
         except ValidationError as exc:
             return jsonify({'error': str(exc)}), 400
 
@@ -480,51 +557,82 @@ def register_routes(app):
         user = get_user_by_email(email)
         if not user:
             user = create_user(
-                email=email,
-                password=None,
-                full_name=full_name,
-                auth_provider='google',
-                google_id=google_id,
-                profile_picture=picture
+                email=email, password=None, full_name=full_name,
+                auth_provider='google', google_id=google_id, profile_picture=picture
             )
-
         if user:
             session.clear()
             session['user_id'] = user['id']
             session.permanent = True
-            return jsonify({'success': True, 'redirect': url_for('dashboard')})
+            return jsonify({'success': True})
 
         record_rate_limit_hit('google_auth_attempt', subject=email)
         return jsonify({'error': 'Authentication failed.'}), 400
 
-    @app.route('/logout', methods=['POST'])
-    @login_required
-    def logout():
-        session.clear()
-        flash('You have been logged out.', 'info')
-        return redirect(url_for('index'))
-
-    @app.route('/dashboard')
-    @login_required
-    def dashboard():
-        history = get_analysis_history(g.user['id'], limit=10)
-        return render_template(
-            'dashboard.html',
-            history=history,
-            results=app.config['TRAINING_RESULTS'],
-            chat_starters=CHAT_STARTERS
-        )
-
-    @app.route('/analyze', methods=['POST'])
-    @login_required
-    def analyze():
+    @csrf.exempt
+    @app.route('/api/auth/password-reset', methods=['POST'])
+    def api_password_reset_request():
+        data = request.get_json(silent=True) or {}
+        email_raw = data.get('email', '')
         try:
-            text = validate_analysis_text(request.form.get('text', ''))
-        except ValidationError as exc:
-            flash(str(exc), 'warning')
-            return redirect(url_for('dashboard'))
+            email = validate_email(email_raw)
+        except ValidationError:
+            email = normalize_email(email_raw) if email_raw else ''
 
-        if rate_limit_exceeded('analyze', limit=20, window_seconds=3600, subject=str(g.user['id'])):
+        if rate_limit_exceeded('password_reset_request', limit=5, window_seconds=3600,
+                               subject=email or None):
+            abort(429)
+
+        user = get_user_by_email(email) if email else None
+        reset_link = None
+        if user and user.get('auth_provider') == 'email':
+            token, hashed = generate_reset_token()
+            create_password_reset_token(user['id'], hashed,
+                                        expiry_iso(app.config['PASSWORD_RESET_TTL_MINUTES']))
+            if app.config['SHOW_RESET_LINKS']:
+                reset_link = f"/api/auth/password-reset/{token}"
+
+        record_rate_limit_hit('password_reset_request', subject=email or 'unknown')
+        payload = {'message': 'If the account exists, a reset link has been prepared.'}
+        if reset_link:
+            payload['reset_link'] = reset_link
+        return jsonify(payload)
+
+    @csrf.exempt
+    @app.route('/api/auth/password-reset/<token>', methods=['POST'])
+    def api_password_reset(token):
+        record = get_password_reset_record(token_hash(token))
+        if not record or record.get('used_at') or is_expired(record['expires_at']):
+            return jsonify({'error': 'Reset link is invalid or has expired.'}), 404
+
+        data = request.get_json(silent=True) or {}
+        password = data.get('password', '')
+        try:
+            validate_password(password)
+        except ValidationError as exc:
+            return jsonify({'error': str(exc)}), 400
+
+        if password != data.get('confirm_password', ''):
+            return jsonify({'error': 'Passwords do not match.'}), 400
+
+        update_user_password(record['user_id'], password)
+        mark_password_reset_used(token_hash(token))
+        return jsonify({'success': True, 'message': 'Password updated. You can now log in.'})
+
+    # --- Core analysis API -----------------------------------------------
+
+    @csrf.exempt
+    @app.route('/api/analyze', methods=['POST'])
+    @api_auth_required
+    def api_analyze():
+        data = request.get_json(silent=True) or {}
+        try:
+            text = validate_analysis_text(data.get('text', ''))
+        except ValidationError as exc:
+            return jsonify({'error': str(exc)}), 400
+
+        if rate_limit_exceeded('api_analyze', limit=20, window_seconds=3600,
+                               subject=str(g.user['id'])):
             abort(429)
 
         analysis = analyze_text_input(text)
@@ -535,112 +643,6 @@ def register_routes(app):
             confidence=analysis['confidence'],
             model_used=analysis['model']
         )
-        record_rate_limit_hit('analyze', subject=str(g.user['id']))
-
-        return render_template(
-            'result.html',
-            text=text,
-            prediction=analysis['label'],
-            confidence=analysis['confidence'],
-            is_depressive=(analysis['prediction'] == 1)
-        )
-
-    @app.route('/profile', methods=['GET', 'POST'])
-    @login_required
-    def profile():
-        if request.method == 'POST':
-            try:
-                full_name = validate_full_name(request.form.get('full_name', ''))
-                bio = validate_bio(request.form.get('bio', ''))
-            except ValidationError as exc:
-                flash(str(exc), 'error')
-                history = get_analysis_history(g.user['id'], limit=50)
-                return render_template('profile.html', history=history), 400
-
-            update_user_profile(g.user['id'], full_name=full_name, bio=bio)
-            flash('Profile updated successfully.', 'success')
-            return redirect(url_for('profile'))
-
-        history = get_analysis_history(g.user['id'], limit=50)
-        return render_template('profile.html', history=history)
-
-    @app.route('/history')
-    @login_required
-    def history():
-        analyses = get_analysis_history(g.user['id'], limit=100)
-        return render_template('history.html', history=analyses)
-
-    @app.route('/about')
-    def about():
-        return render_template('about.html', results=app.config['TRAINING_RESULTS'])
-
-    @app.route('/password-reset', methods=['GET', 'POST'])
-    def password_reset_request():
-        reset_link = None
-        if request.method == 'POST':
-            email_raw = request.form.get('email', '')
-            try:
-                email = validate_email(email_raw)
-            except ValidationError:
-                email = normalize_email(email_raw) if email_raw else ''
-
-            if rate_limit_exceeded('password_reset_request', limit=5, window_seconds=3600, subject=email or None):
-                abort(429)
-
-            user = get_user_by_email(email) if email else None
-            if user and user.get('auth_provider') == 'email':
-                token, hashed = generate_reset_token()
-                create_password_reset_token(user['id'], hashed, expiry_iso(app.config['PASSWORD_RESET_TTL_MINUTES']))
-                if app.config['SHOW_RESET_LINKS']:
-                    reset_link = url_for('password_reset', token=token, _external=False)
-            record_rate_limit_hit('password_reset_request', subject=email or 'unknown')
-            flash('If the account exists, a reset link has been prepared.', 'info')
-        return render_template('reset_request.html', reset_link=reset_link)
-
-    @app.route('/password-reset/<token>', methods=['GET', 'POST'])
-    def password_reset(token):
-        record = get_password_reset_record(token_hash(token))
-        if not record or record.get('used_at') or is_expired(record['expires_at']):
-            abort(404)
-
-        if request.method == 'POST':
-            password = request.form.get('password', '')
-            confirm_password = request.form.get('confirm_password', '')
-            try:
-                validate_password(password)
-            except ValidationError as exc:
-                flash(str(exc), 'error')
-                return render_template('reset_password.html', token=token), 400
-
-            if password != confirm_password:
-                flash('Passwords do not match.', 'error')
-                return render_template('reset_password.html', token=token), 400
-
-            update_user_password(record['user_id'], password)
-            mark_password_reset_used(token_hash(token))
-            flash('Password updated successfully. You can log in now.', 'success')
-            return redirect(url_for('login'))
-
-        return render_template('reset_password.html', token=token)
-
-    @app.route('/admin/security')
-    @admin_required
-    def admin_security():
-        return render_template('admin_security.html', security_events=get_recent_security_events(limit=25))
-
-    @app.route('/api/analyze', methods=['POST'])
-    @login_required
-    def api_analyze():
-        data = request.get_json(silent=True) or {}
-        try:
-            text = validate_analysis_text(data.get('text', ''))
-        except ValidationError as exc:
-            return jsonify({'error': str(exc)}), 400
-
-        if rate_limit_exceeded('api_analyze', limit=20, window_seconds=3600, subject=str(g.user['id'])):
-            abort(429)
-
-        analysis = analyze_text_input(text)
         record_rate_limit_hit('api_analyze', subject=str(g.user['id']))
         return jsonify({
             'prediction': 'depressive' if analysis['prediction'] == 1 else 'non_depressive',
@@ -649,8 +651,9 @@ def register_routes(app):
             'disclaimer': 'This is a screening tool, not a clinical diagnosis. Please consult a mental health professional.'
         })
 
+    @csrf.exempt
     @app.route('/api/chat', methods=['POST'])
-    @login_required
+    @api_auth_required
     def api_chat():
         data = request.get_json(silent=True) or {}
         try:
@@ -658,12 +661,12 @@ def register_routes(app):
         except ValidationError as exc:
             return jsonify({'error': str(exc)}), 400
 
-        if rate_limit_exceeded('api_chat', limit=30, window_seconds=3600, subject=str(g.user['id'])):
+        if rate_limit_exceeded('api_chat', limit=30, window_seconds=3600,
+                               subject=str(g.user['id'])):
             abort(429)
 
         analysis = analyze_text_input(text)
         reply, suggestions, status = build_chatbot_reply(g.user['full_name'], text, analysis)
-
         save_analysis(
             user_id=g.user['id'],
             input_text=text[:500],
@@ -672,7 +675,6 @@ def register_routes(app):
             model_used=analysis['model']
         )
         record_rate_limit_hit('api_chat', subject=str(g.user['id']))
-
         return jsonify({
             'reply': reply,
             'suggestions': suggestions,
@@ -685,21 +687,64 @@ def register_routes(app):
             'disclaimer': 'Kansi AI offers supportive screening, not clinical diagnosis.'
         })
 
+    # --- History & profile (consumed by Next.js frontend) ----------------
+
+    @app.route('/api/history')
+    @api_auth_required
+    def api_history():
+        limit = min(int(request.args.get('limit', 20)), 100)
+        history = get_analysis_history(g.user['id'], limit=limit)
+        return jsonify({'history': history or []})
+
+    @app.route('/api/profile', methods=['GET', 'POST'])
+    @api_auth_required
+    def api_profile():
+        if request.method == 'GET':
+            u = g.user
+            return jsonify({
+                'id': u['id'],
+                'email': u.get('email', ''),
+                'full_name': u.get('full_name', ''),
+                'bio': u.get('bio', ''),
+                'auth_provider': u.get('auth_provider', 'email'),
+            })
+
+        data = request.get_json(silent=True) or {}
+        try:
+            full_name = validate_full_name(data.get('full_name', g.user.get('full_name', '')))
+            bio = validate_bio(data.get('bio', g.user.get('bio', '')))
+        except ValidationError as exc:
+            return jsonify({'error': str(exc)}), 400
+
+        update_user_profile(g.user['id'], full_name=full_name, bio=bio)
+        return jsonify({'success': True, 'full_name': full_name, 'bio': bio})
+
+    # --- Webhooks --------------------------------------------------------
+
     @csrf.exempt
     @app.route('/webhooks/events', methods=['POST'])
     def webhook_events():
         raw_body = request.get_data(cache=True)
         signature = request.headers.get('X-Kansi-Signature', '')
         if not verify_webhook_signature(app.config['SECURITY_WEBHOOK_SECRET'], raw_body, signature):
-            record_security_event('webhook_rejected', subject='signature', ip_address=get_request_ip(), metadata={'path': request.path})
+            record_security_event('webhook_rejected', subject='signature',
+                                  ip_address=get_request_ip(), metadata={'path': request.path})
             abort(403)
 
         payload = request.get_json(silent=True) or {}
         if 'event' not in payload:
             return jsonify({'error': 'Missing event field.'}), 400
 
-        record_security_event('webhook_accepted', subject=str(payload['event']), ip_address=get_request_ip())
+        record_security_event('webhook_accepted', subject=str(payload['event']),
+                              ip_address=get_request_ip())
         return jsonify({'status': 'accepted'}), 200
+
+    # --- Admin -----------------------------------------------------------
+
+    @app.route('/api/admin/security')
+    @admin_required
+    def admin_security():
+        return jsonify({'security_events': get_recent_security_events(limit=25)})
 
     @app.route('/api/support-preview', methods=['POST'])
     @admin_required

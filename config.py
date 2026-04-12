@@ -38,6 +38,10 @@ class BaseConfig:
         'KANSI_ENABLE_DEMO_GOOGLE_AUTH',
         ENV_NAME != 'production'
     )
+    # Clerk JWT validation (set to your Clerk JWKS endpoint)
+    # Format: https://<clerk-frontend-api>/.well-known/jwks.json
+    CLERK_JWKS_URL = os.getenv('CLERK_JWKS_URL', '')
+    FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
 
 
 class TestConfig(BaseConfig):
