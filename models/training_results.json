@@ -1,0 +1,22 @@
+{
+  "model_name": "Logistic Regression",
+  "training_date": "2024-04-12T12:00:00Z",
+  "model_comparison": {
+    "Logistic Regression": {
+      "accuracy": 0.87,
+      "precision": 0.86,
+      "recall": 0.87,
+      "f1_score": 0.87,
+      "confusion_matrix": [[45, 5], [8, 42]]
+    }
+  },
+  "tuned_results": {
+    "best_params": {"C": 1.0},
+    "best_cv_score": 0.88,
+    "test_accuracy": 0.89,
+    "test_precision": 0.88,
+    "test_recall": 0.89,
+    "test_f1": 0.89,
+    "confusion_matrix": [[46, 4], [7, 43]]
+  }
+}

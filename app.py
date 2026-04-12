@@ -1,9 +1,3 @@
-"""
-Kansi AI - Flask Web Application
-==================================
-Main application with user authentication, profile management,
-password reset, admin security views, and AI-powered text analysis.
-"""
 
 import json
 import logging
@@ -57,7 +51,10 @@ from security import (
 )
 
 
+from middleware import auth_middleware
+
 csrf = CSRFProtect()
+
 
 CHAT_STARTERS = [
     "I have been feeling disconnected from everything lately.",
@@ -284,6 +281,10 @@ def build_chatbot_reply(user_name, text, analysis):
 
 
 def register_security_hooks(app):
+    @app.before_request
+    def auth_middleware_wrapper():
+        auth_middleware()
+
     @app.before_request
     def load_current_user():
         g.user = None
