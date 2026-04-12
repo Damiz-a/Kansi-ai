@@ -348,6 +348,7 @@ def register_security_hooks(app):
             'site_url': app.config['SITE_URL'] or request.url_root.rstrip('/'),
             'preview_image_url': f"{app.config['SITE_URL'] or request.url_root.rstrip('/')}{url_for('static', filename='img/social-preview.svg')}",
             'demo_google_auth_enabled': app.config['ENABLE_DEMO_GOOGLE_AUTH'],
+            'clerk_configured': app.config['CLERK_CONFIGURED'],
         }
 
 
@@ -465,6 +466,8 @@ def register_routes(app):
     def google_auth():
         if not app.config['ENABLE_DEMO_GOOGLE_AUTH']:
             abort(403)
+        if not app.config['CLERK_CONFIGURED']:
+            return jsonify({'error': 'Clerk is not configured. Add NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY.'}), 503
         data = request.get_json(silent=True) or {}
         try:
             email = validate_email(data.get('email', ''))

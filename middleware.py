@@ -1,23 +1,46 @@
-from functools import wraps
-from flask import request, abort, redirect, url_for, jsonify, session, g
+import re
+
+from flask import abort, g, redirect, request, session, url_for
+
 from database import get_user_by_id
 
-def is_api_request():
-    \"\"\"Check if request is API call.\"\"\"
-    return request.path.startswith('/api/') or request.is_json or request.path.startswith('/webhooks/')
+STATIC_FILE_RE = re.compile(
+    r"\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)$",
+    re.IGNORECASE,
+)
 
-def is_static_request():
-    \"\"\"Check if request is for static assets.\"\"\"
-    return (
-        request.path.startswith('/static/') or
-        request.path in ['/favicon.ico'] or
-        any(request.path.endswith(ext) for ext in ['.css', '.js', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico'])
-    )
+
+def _is_api_or_trpc_route(path: str) -> bool:
+    """Equivalent to Next matcher '/(api|trpc)(.*)'."""
+    return path == '/api' or path.startswith('/api/') or path == '/trpc' or path.startswith('/trpc/')
+
+
+def _is_static_or_internal(path: str) -> bool:
+    """Equivalent to skipping _next and static file extensions."""
+    if path.startswith('/_next/'):
+        return True
+    if path.startswith('/static/'):
+        return True
+    return bool(STATIC_FILE_RE.search(path))
+
+
+def _matches_clerk_style_middleware(path: str) -> bool:
+    """
+    Flask approximation of:
+      1) '/((?!_next|...static-extensions...).*)'
+      2) '/(api|trpc)(.*)'
+    """
+    if _is_api_or_trpc_route(path):
+        return True
+    return not _is_static_or_internal(path)
+
 
 def auth_middleware():
-    \"\"\"Flask equivalent of Clerk middleware: protect dynamic/API routes, skip static/public.\"\"\"
-    # Skip static files, public routes
-    if is_static_request():
+    """Flask equivalent of Clerk matcher + auth gate for protected routes."""
+    path = request.path or '/'
+    g.user = None
+
+    if not _matches_clerk_style_middleware(path):
         return
 
     public_routes = {
@@ -26,12 +49,11 @@ def auth_middleware():
         '/register': True,
         '/about': True,
         '/password-reset': True,
-        '/password-reset/': True  # prefix match
+        '/password-reset/': True,
     }
-    if request.path in public_routes or request.path.startswith('/password-reset/'):
+    if path in public_routes or path.startswith('/password-reset/'):
         return
 
-    # Load user if session present
     user_id = session.get('user_id')
     if user_id:
         g.user = get_user_by_id(user_id)
@@ -39,11 +61,9 @@ def auth_middleware():
             session.clear()
             g.user = None
 
-    # Protect API/dynamic routes (Clerk matcher equivalent)
-    if is_api_request() or request.path.startswith(('/dashboard', '/profile', '/history', '/analyze')):
+    if _is_api_or_trpc_route(path) or path.startswith(('/dashboard', '/profile', '/history', '/analyze')):
         if not g.user:
-            if is_api_request():
+            if _is_api_or_trpc_route(path) or request.is_json:
                 abort(401, description='Authentication required')
             session.clear()
             return redirect(url_for('login'))
-

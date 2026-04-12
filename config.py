@@ -1,6 +1,22 @@
 import os
 import secrets
 
+def _load_local_env(path='.env'):
+    if not os.path.exists(path):
+        return
+    with open(path, 'r', encoding='utf-8') as env_file:
+        for raw_line in env_file:
+            line = raw_line.strip()
+            if not line or line.startswith('#') or '=' not in line:
+                continue
+            key, value = line.split('=', 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+_load_local_env()
+
 
 def env_flag(name, default=False):
     value = os.getenv(name)
@@ -34,9 +50,12 @@ class BaseConfig:
         for host in os.getenv('KANSI_ALLOWED_FETCH_HOSTS', 'findahelpline.com').split(',')
         if host.strip()
     ]
+    CLERK_PUBLISHABLE_KEY = os.getenv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', '').strip()
+    CLERK_SECRET_KEY = os.getenv('CLERK_SECRET_KEY', '').strip()
+    CLERK_CONFIGURED = bool(CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY)
     ENABLE_DEMO_GOOGLE_AUTH = env_flag(
         'KANSI_ENABLE_DEMO_GOOGLE_AUTH',
-        ENV_NAME != 'production'
+        CLERK_CONFIGURED or ENV_NAME != 'production'
     )
 
 
@@ -48,3 +67,4 @@ class TestConfig(BaseConfig):
     SHOW_RESET_LINKS = True
     SESSION_COOKIE_SECURE = False
     ENABLE_DEMO_GOOGLE_AUTH = True
+    CLERK_CONFIGURED = True
