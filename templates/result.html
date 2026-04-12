@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Your Result — Kansi AI{% endblock %}
+
+{% block content %}
+<div class="result-container">
+    <div class="card result-card">
+        {% if is_depressive %}
+        <span class="result-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M7.5 13.5a3.5 3.5 0 1 1 0-7c1.5 0 2.3.7 3 1.7.7-1 1.5-1.7 3-1.7a3.5 3.5 0 1 1 0 7c-1.2 0-2.2-.4-3-1.3-.8.9-1.8 1.3-3 1.3Z"/>
+                <path d="M6 18c1.6-1.7 3-2.5 4.5-2.5S13.4 16.3 15 18"/>
+                <path d="M10.5 15.5V21"/>
+            </svg>
+        </span>
+        <div class="result-label result-depressive">
+            Signs of emotional distress detected
+        </div>
+        <p style="color: var(--text-muted); margin-top: 0.5rem;">Confidence: {{ confidence }}%</p>
+
+        <div class="confidence-bar">
+            <div class="confidence-fill" style="width: {{ confidence }}%; background: linear-gradient(90deg, var(--warm-rose), var(--danger));"></div>
+        </div>
+
+        <div class="support-banner" style="text-align: left; margin-top: 1.5rem;">
+            <span class="support-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 20s-6.5-4.1-8.6-8.1C1.7 8.8 3.1 5 7 5c2.1 0 3.4 1 5 2.8C13.6 6 14.9 5 17 5c3.9 0 5.3 3.8 3.6 6.9C18.5 15.9 12 20 12 20Z"/>
+                </svg>
+            </span>
+            <div>
+                <p style="margin-bottom: 0.75rem;"><strong style="color: var(--text-primary);">We see you, and your feelings are valid.</strong></p>
+                <p>This analysis noticed some patterns in your words that may suggest emotional distress. That does not define who you are, it simply means your words carry weight right now, and that is okay.</p>
+                <p style="margin-top: 0.75rem;">If you're going through a tough time, talking to someone you trust can make a real difference. You deserve support.</p>
+                <p style="margin-top: 0.75rem; font-size: 0.88rem;">
+                    <strong>Samaritans:</strong> 116 123 (free, 24/7) &nbsp;|&nbsp;
+                    <strong>Crisis Text Line:</strong> Text HOME to 741741
+                </p>
+            </div>
+        </div>
+
+        {% else %}
+        <span class="result-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3.2"/>
+                <path d="M12 3.5v3"/>
+                <path d="M12 17.5v3"/>
+                <path d="m5.9 5.9 2.2 2.2"/>
+                <path d="m15.9 15.9 2.2 2.2"/>
+                <path d="M3.5 12h3"/>
+                <path d="M17.5 12h3"/>
+                <path d="m5.9 18.1 2.2-2.2"/>
+                <path d="m15.9 8.1 2.2-2.2"/>
+            </svg>
+        </span>
+        <div class="result-label result-safe">
+            No depressive indicators detected
+        </div>
+        <p style="color: var(--text-muted); margin-top: 0.5rem;">Confidence: {{ confidence }}%</p>
+
+        <div class="confidence-bar">
+            <div class="confidence-fill" style="width: {{ confidence }}%; background: linear-gradient(90deg, var(--warm-sage), var(--success));"></div>
+        </div>
+
+        <div class="support-banner" style="text-align: left; margin-top: 1.5rem;">
+            <span class="support-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M7 18c3.5 0 6-2.3 6-6.2V6.5C8.5 6.5 6 9.6 6 13.7V18h1Z"/>
+                    <path d="M13 17c3.2 0 5-2.2 5-5.6V8c-3.7 0-6 2.4-6 6.2V17h1Z"/>
+                    <path d="M12 20v-6"/>
+                </svg>
+            </span>
+            <div>
+                <p>Your text doesn't show strong patterns associated with depressive indicators. That's a positive sign! Remember that mental well-being is a journey, and it's always okay to check in with yourself.</p>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="input-text">
+            <strong style="color: var(--text-primary); font-style: normal;">What you shared:</strong><br>
+            "{{ text[:300] }}{% if text | length > 300 %}...{% endif %}"
+        </div>
+
+        <div class="disclaimer">
+            <strong>A gentle reminder:</strong> This is an AI screening tool. It reads patterns in words, but it cannot understand the full picture of who you are and what you are going through. Please treat this result as one perspective among many, and always consult a mental health professional for personalised guidance.
+        </div>
+
+        <div class="actions">
+            <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Write something new</a>
+            <a href="{{ url_for('history') }}" class="btn btn-outline">View my history</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

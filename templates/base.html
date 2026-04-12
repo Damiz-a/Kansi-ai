@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="{% block meta_description %}Kansi AI is a privacy-conscious mental health support web app with secure check-ins, supportive chat, and local screening insights.{% endblock %}">
+    <meta name="csrf-token" content="{{ csrf_token_value }}">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Kansi AI">
+    <meta property="og:title" content="{% block og_title %}Kansi AI{% endblock %}">
+    <meta property="og:description" content="{% block og_description %}Kansi AI offers supportive mental health check-ins with privacy-first design and secure local screening.{% endblock %}">
+    <meta property="og:url" content="{{ request.url }}">
+    <meta property="og:image" content="{{ preview_image_url }}">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{% block twitter_title %}Kansi AI{% endblock %}">
+    <meta name="twitter:description" content="{% block twitter_description %}Private mental health check-ins and supportive AI-guided conversation.{% endblock %}">
+    <meta name="twitter:image" content="{{ preview_image_url }}">
+    <title>{% block title %}Kansi AI{% endblock %}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/kansi-favicon.svg') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <nav>
+        <a href="/" class="nav-brand">
+            <span class="brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3c-4.2 0-7 2.9-7 6.7 0 2.4 1.1 4.4 2.9 5.5V19l3.1-1.8c.3.1.7.1 1 .1 4.2 0 7-2.9 7-6.6S16.2 3 12 3Z"/>
+                    <path d="M9.2 10.4h5.6"/>
+                    <path d="M9.2 13.2h3.6"/>
+                </svg>
+            </span>
+            Kansi <span>AI</span>
+        </a>
+        <div class="nav-links">
+            {% if user %}
+                <a href="{{ url_for('dashboard') }}">Dashboard</a>
+                <a href="{{ url_for('history') }}">History</a>
+                <a href="{{ url_for('profile') }}">Profile</a>
+                {% if user.is_admin %}
+                    <a href="{{ url_for('admin_security') }}">Security</a>
+                {% endif %}
+                <a href="{{ url_for('about') }}">About</a>
+                <form method="POST" action="{{ url_for('logout') }}" class="inline-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token_value }}">
+                    <button type="submit" class="nav-button logout-link">Logout</button>
+                </form>
+            {% else %}
+                <a href="{{ url_for('about') }}">About</a>
+                <a href="{{ url_for('login') }}">Login</a>
+                <a href="{{ url_for('register') }}" class="btn btn-primary" style="padding: 0.5rem 1.1rem; font-size: 0.88rem;">Sign Up</a>
+            {% endif %}
+        </div>
+    </nav>
+
+    <div class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <footer>
+        <p>&copy; 2026 Kansi AI - A gentle companion for mental health awareness</p>
+        <p>You are not alone. If you need support, please reach out to a trusted person or professional.</p>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
