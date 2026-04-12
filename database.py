@@ -13,10 +13,13 @@ from datetime import datetime, timezone
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHash, VerifyMismatchError
 
-DB_PATH = os.getenv(
-    'KANSI_DB_PATH',
-    os.path.join(os.path.dirname(__file__), 'data', 'kansi_ai.db')
+DEFAULT_DB_PATH = (
+    os.path.join('/tmp', 'kansi_ai.db')
+    if os.getenv('VERCEL') == '1'
+    else os.path.join(os.path.dirname(__file__), 'data', 'kansi_ai.db')
 )
+
+DB_PATH = os.getenv('KANSI_DB_PATH', DEFAULT_DB_PATH)
 
 password_hasher = PasswordHasher()
 
