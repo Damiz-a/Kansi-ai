@@ -27,6 +27,9 @@ limiter = Limiter(get_remote_address, app=app, default_limits=["120 per minute"]
 init_db()
 
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
+MODEL_UNAVAILABLE_MESSAGE = (
+    "Analysis model is currently unavailable. You can still use chat and other features while we restore it."
+)
 model = None
 tfidf = None
 model_load_error = None
@@ -241,6 +244,8 @@ def logout():
 @login_required
 def dashboard():
     history = get_analysis_history(g.user["id"], limit=10)
+    if model is None or tfidf is None:
+        flash(MODEL_UNAVAILABLE_MESSAGE, "warning")
     return render_template("dashboard.html", user=g.user, history=history, results=training_results)
 
 
@@ -277,6 +282,10 @@ def api_chat():
 @login_required
 @limiter.limit("20 per minute")
 def analyze():
+    if model is None or tfidf is None:
+        flash(MODEL_UNAVAILABLE_MESSAGE, "warning")
+        return redirect(url_for("dashboard"))
+
     text = sanitize(request.form.get("text", ""), 5000)
     if not text or len(text) < 10:
         flash("Please enter at least 10 characters.", "warning")
@@ -346,6 +355,12 @@ def handle_alert(alert_id, action):
 @login_required
 @limiter.limit("20 per minute")
 def api_analyze():
+    if model is None or tfidf is None:
+        return jsonify({
+            "error": "Model unavailable",
+            "message": MODEL_UNAVAILABLE_MESSAGE
+        }), 503
+
     data = request.get_json()
     if not data:
         return jsonify({"error": "Invalid request"}), 400
