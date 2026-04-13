@@ -27,10 +27,18 @@ limiter = Limiter(get_remote_address, app=app, default_limits=["120 per minute"]
 init_db()
 
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "models")
-model = joblib.load(os.path.join(MODEL_DIR, "kansi_ai_model.pkl"))
-tfidf = joblib.load(os.path.join(MODEL_DIR, "tfidf_vectorizer.pkl"))
-with open(os.path.join(MODEL_DIR, "training_results.json")) as f:
-    training_results = json.load(f)
+model = None
+tfidf = None
+model_load_error = None
+training_results = {"model_name": "Unavailable"}
+
+try:
+    model = joblib.load(os.path.join(MODEL_DIR, "kansi_ai_model.pkl"))
+    tfidf = joblib.load(os.path.join(MODEL_DIR, "tfidf_vectorizer.pkl"))
+    with open(os.path.join(MODEL_DIR, "training_results.json")) as f:
+        training_results = json.load(f)
+except Exception as e:
+    model_load_error = str(e)
 
 
 def login_required(f):
@@ -74,6 +82,8 @@ def check_triggers(text):
 
 
 def predict_text(text):
+    if model is None or tfidf is None:
+        return 0, "Model unavailable", 0.0
     cleaned = clean_for_model(text)
     features = tfidf.transform([cleaned])
     prediction = model.predict(features)[0]
