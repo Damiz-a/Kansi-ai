@@ -1,55 +1,23 @@
 {% extends "base.html" %}
 {% block title %}About — Kansi AI{% endblock %}
-
 {% block content %}
 <div class="about-hero">
-    <h1>About Kansi AI</h1>
-    <p>Kansi AI was built with one belief: technology should be kind. We use machine learning to gently identify emotional patterns in text, not to label anyone, but to open a door to awareness and support.</p>
+    <h1>🧠 About Kansi AI</h1>
+    <p>Technology should be kind. We use machine learning to gently identify emotional patterns in text — not to label anyone, but to open a door to awareness and support.</p>
 </div>
-
 <div class="about-grid">
-    <div class="card about-card">
-        <h3>How It Works</h3>
-        <p>You write freely. Kansi AI reads the emotional texture of your words, looking for linguistic patterns like emotional tone, self-focused language, and expressions that research has linked to distress. It is like having a gentle observer who notices what you might not see yourself.</p>
+    <div class="card about-card"><h3>🌱 How It Works</h3><p>You write freely. Kansi AI reads the emotional texture of your words using TF-IDF feature extraction and a tuned Logistic Regression model trained via supervised learning. It looks for linguistic patterns research has linked to distress.</p></div>
+    <div class="card about-card"><h3>📊 Model Performance</h3>
+        {% if results %}<table class="metrics-table"><tr><th>Metric</th><th>Score</th></tr>
+        <tr><td>Model</td><td>{{ results.get('model_name','N/A') }}</td></tr>
+        <tr><td>Accuracy</td><td>{{ (results.get('tuned_results',{}).get('test_accuracy',0)*100)|round(1) }}%</td></tr>
+        <tr><td>F1-Score</td><td>{{ (results.get('tuned_results',{}).get('test_f1',0)*100)|round(1) }}%</td></tr>
+        <tr><td>Precision</td><td>{{ (results.get('tuned_results',{}).get('test_precision',0)*100)|round(1) }}%</td></tr>
+        <tr><td>Recall</td><td>{{ (results.get('tuned_results',{}).get('test_recall',0)*100)|round(1) }}%</td></tr>
+        </table>{% endif %}
     </div>
-    <div class="card about-card">
-        <h3>The Science Behind It</h3>
-        <p>Our model uses TF-IDF (Term Frequency-Inverse Document Frequency) to understand which words and phrases carry emotional weight. It was trained using supervised machine learning and evaluated rigorously.</p>
-        {% if results %}
-        <table class="metrics-table" style="margin-top: 1rem;">
-            <tr><th>Detail</th><th>Value</th></tr>
-            <tr><td>Model</td><td>{{ results.get('model_name', 'N/A') }}</td></tr>
-            <tr><td>Test accuracy</td><td>{{ (results.get('tuned_results', {}).get('test_accuracy', 0) * 100) | round(1) }}%</td></tr>
-            <tr><td>F1-Score</td><td>{{ (results.get('tuned_results', {}).get('test_f1', 0) * 100) | round(1) }}%</td></tr>
-            <tr><td>Precision</td><td>{{ (results.get('tuned_results', {}).get('test_precision', 0) * 100) | round(1) }}%</td></tr>
-            <tr><td>Recall</td><td>{{ (results.get('tuned_results', {}).get('test_recall', 0) * 100) | round(1) }}%</td></tr>
-        </table>
-        {% endif %}
-    </div>
-    <div class="card about-card">
-        <h3>Privacy First</h3>
-        <p>Your data belongs to you. Passwords are salted and hashed. Analysis is processed locally. We do not share, sell, or expose your information. You can sign in with your email or Google account, whatever feels comfortable.</p>
-    </div>
-    <div class="card about-card">
-        <h3>Our Promise</h3>
-        <p>Kansi AI will never pretend to be a therapist. It is a screening tool, a first step, a gentle nudge, a way to check in with yourself. For real support, we always encourage speaking with a professional who can truly understand your situation.</p>
-    </div>
+    <div class="card about-card"><h3>🔒 Security</h3><p>Fernet-encrypted storage for all sensitive data. Salted password hashing. Rate limiting on all endpoints. Input sanitisation with bleach. Row-level security enforced at the query level. No API keys in frontend code.</p></div>
+    <div class="card about-card"><h3>🤝 Our Promise</h3><p>Kansi AI will never pretend to be a therapist. It is a screening tool — a first step. For real support, speak with a professional. If crisis language is detected, our system silently connects with emergency services to keep you safe.</p></div>
 </div>
-
-<div class="support-banner" style="margin-top: 2rem;">
-    <span class="support-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3.2"/>
-            <path d="M12 3.5v3"/>
-            <path d="M12 17.5v3"/>
-            <path d="m5.9 5.9 2.2 2.2"/>
-            <path d="m15.9 15.9 2.2 2.2"/>
-            <path d="M3.5 12h3"/>
-            <path d="M17.5 12h3"/>
-            <path d="m5.9 18.1 2.2-2.2"/>
-            <path d="m15.9 8.1 2.2-2.2"/>
-        </svg>
-    </span>
-    <p>If something in your results ever concerns you, please know that help is always available. In the UK, you can call <strong>Samaritans at 116 123</strong> (free, 24/7). Worldwide, visit <a href="https://findahelpline.com/" target="_blank" rel="noopener">findahelpline.com</a> to find support near you.</p>
-</div>
+<div class="support-banner" style="margin-top:2rem;"><span class="support-icon">☀️</span><p>Help is always available. UK: <strong>Samaritans 116 123</strong> (free, 24/7). Worldwide: <a href="https://findahelpline.com/" target="_blank" rel="noopener" style="color:var(--warm-gold);font-weight:600;">findahelpline.com</a></p></div>
 {% endblock %}

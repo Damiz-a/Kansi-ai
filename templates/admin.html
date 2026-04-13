@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Admin Panel — Kansi AI{% endblock %}
+{% block content %}
+<h1 style="margin-bottom:0.5rem;">🔒 Admin Panel</h1>
+<p style="color:var(--text-muted);margin-bottom:1.5rem;">Crisis alert management and user oversight</p>
+
+{% if auto_escalated > 0 %}
+<div class="alert alert-warning">⚠️ {{ auto_escalated }} alert(s) were auto-escalated to emergency services (60s timeout expired).</div>
+{% endif %}
+
+<div class="card" style="margin-bottom:2rem;">
+    <h2 style="margin-bottom:1rem;">🚨 Pending Crisis Alerts</h2>
+    {% if alerts %}
+    <p style="color:var(--text-muted);margin-bottom:1rem;font-size:0.9rem;">You have 60 seconds from alert creation to cancel or escalate. After timeout, alerts auto-escalate.</p>
+    {% for a in alerts %}
+    <div style="padding:1.25rem;margin-bottom:1rem;background:rgba(212,131,138,0.08);border:1px solid rgba(212,131,138,0.2);border-radius:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:1rem;">
+            <div>
+                <p><strong>User:</strong> {{ a.user_name }} ({{ a.user_email }})</p>
+                <p><strong>Trigger:</strong> <span style="color:var(--danger);font-weight:600;">{{ a.trigger_phrase }}</span></p>
+                <p><strong>Message:</strong> "{{ a.user_message[:200] }}{% if a.user_message|length > 200 %}...{% endif %}"</p>
+                <p><strong>Country:</strong> {{ a.user_country or 'Unknown' }} — Hotline: {{ hotlines.get(a.user_country, hotlines.DEFAULT).name }} ({{ hotlines.get(a.user_country, hotlines.DEFAULT).number }})</p>
+                <p><strong>Phone:</strong> {{ a.user_phone or 'Not provided' }}</p>
+                <p style="font-size:0.82rem;color:var(--text-muted);">Created: {{ a.created_at }} | Auto-escalates: {{ a.auto_escalate_at }}</p>
+            </div>
+            <div style="display:flex;gap:0.5rem;flex-shrink:0;">
+                <form method="POST" action="{{ url_for('handle_alert', alert_id=a.id, action='escalated') }}">
+                    <button type="submit" class="btn btn-primary" style="background:var(--danger);padding:0.6rem 1.2rem;font-size:0.88rem;">Escalate Now</button>
+                </form>
+                <form method="POST" action="{{ url_for('handle_alert', alert_id=a.id, action='cancelled') }}">
+                    <button type="submit" class="btn btn-outline" style="padding:0.6rem 1.2rem;font-size:0.88rem;">Cancel Alert</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p style="color:var(--text-muted);text-align:center;padding:2rem;">No pending alerts. All clear. ✅</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <h2 style="margin-bottom:1rem;">👥 Registered Users ({{ users|length }})</h2>
+    <table class="history-table">
+        <thead><tr><th>Name</th><th>Email</th><th>Country</th><th>Auth</th><th>Role</th><th>Joined</th></tr></thead>
+        <tbody>
+        {% for u in users %}
+        <tr><td>{{ u.full_name }}</td><td>{{ u.email }}</td><td>{{ u.country_code }}</td><td>{{ u.auth_provider }}</td><td><span class="badge {% if u.role == 'admin' %}badge-danger{% else %}badge-success{% endif %}">{{ u.role }}</span></td><td>{{ u.created_at[:10] if u.created_at else '' }}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+setInterval(() => { if (document.querySelector('[style*="rgba(212,131,138"]')) location.reload(); }, 15000);
+</script>
+{% endblock %}

@@ -1,70 +1,41 @@
 import os
-import secrets
+from dotenv import load_dotenv
+from cryptography.fernet import Fernet
 
-def _load_local_env(path='.env'):
-    if not os.path.exists(path):
-        return
-    with open(path, 'r', encoding='utf-8') as env_file:
-        for raw_line in env_file:
-            line = raw_line.strip()
-            if not line or line.startswith('#') or '=' not in line:
-                continue
-            key, value = line.split('=', 1)
-            key = key.strip()
-            value = value.strip().strip('"').strip("'")
-            if key and key not in os.environ:
-                os.environ[key] = value
+load_dotenv()
 
-_load_local_env()
+FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY", Fernet.generate_key().decode())
+ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@example.com")
+ADMIN_DEFAULT_PASSWORD = os.getenv("ADMIN_DEFAULT_PASSWORD", Fernet.generate_key().decode()[:16])
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+ALERT_TIMEOUT_SECONDS = int(os.getenv("ALERT_TIMEOUT_SECONDS", "60"))
+MAX_LOGIN_ATTEMPTS = int(os.getenv("MAX_LOGIN_ATTEMPTS", "5"))
+LOGIN_LOCKOUT_MINUTES = int(os.getenv("LOGIN_LOCKOUT_MINUTES", "25"))
+MAX_PAYLOAD_SIZE_BYTES = int(os.getenv("MAX_PAYLOAD_SIZE_BYTES", "10240"))
+DATABASE_PATH = os.getenv("DATABASE_PATH", "data/kansi_ai.db")
 
+fernet = Fernet(ENCRYPTION_KEY if len(ENCRYPTION_KEY) == 44 else Fernet.generate_key())
 
-def env_flag(name, default=False):
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+CRISIS_HOTLINES = {
+    "GB": {"name": "Samaritans", "number": "116 123", "emergency": "999"},
+    "US": {"name": "988 Suicide & Crisis Lifeline", "number": "988", "emergency": "911"},
+    "CA": {"name": "Crisis Services Canada", "number": "1-833-456-4566", "emergency": "911"},
+    "AU": {"name": "Lifeline Australia", "number": "13 11 14", "emergency": "000"},
+    "IN": {"name": "iCall", "number": "9152987821", "emergency": "112"},
+    "NG": {"name": "SURPIN", "number": "0800-123-0800", "emergency": "112"},
+    "ZA": {"name": "SADAG", "number": "0800 567 567", "emergency": "10111"},
+    "DEFAULT": {"name": "Crisis Text Line", "number": "Text HOME to 741741", "emergency": "112"},
+}
 
-
-class BaseConfig:
-    APP_NAME = 'Kansi AI'
-    ENV_NAME = os.getenv('KANSI_ENV', 'development').lower()
-    SECRET_KEY = os.getenv('KANSI_SECRET_KEY')
-    SESSION_COOKIE_HTTPONLY = True
-    SESSION_COOKIE_SAMESITE = 'Lax'
-    SESSION_COOKIE_SECURE = env_flag('KANSI_SESSION_COOKIE_SECURE', False)
-    PERMANENT_SESSION_LIFETIME_DAYS = int(os.getenv('KANSI_SESSION_LIFETIME_DAYS', '7'))
-    WTF_CSRF_TIME_LIMIT = 3600
-    WTF_CSRF_HEADERS = ['X-CSRFToken', 'X-CSRF-Token']
-    MAX_CONTENT_LENGTH = int(os.getenv('KANSI_MAX_CONTENT_LENGTH', str(64 * 1024)))
-    DEBUG = env_flag('KANSI_DEBUG', False)
-    TESTING = False
-    PROPAGATE_EXCEPTIONS = False
-    TRUSTED_ORIGINS = [origin.strip() for origin in os.getenv('KANSI_TRUSTED_ORIGINS', '').split(',') if origin.strip()]
-    SITE_URL = os.getenv('KANSI_SITE_URL', '').rstrip('/')
-    SHOW_RESET_LINKS = env_flag('KANSI_SHOW_RESET_LINKS', False)
-    SECURITY_WEBHOOK_SECRET = os.getenv('KANSI_WEBHOOK_SECRET', '')
-    SECURITY_LOG_LEVEL = os.getenv('KANSI_LOG_LEVEL', 'INFO').upper()
-    PASSWORD_RESET_TTL_MINUTES = int(os.getenv('KANSI_PASSWORD_RESET_TTL_MINUTES', '30'))
-    SECURITY_ALLOWED_FETCH_HOSTS = [
-        host.strip().lower()
-        for host in os.getenv('KANSI_ALLOWED_FETCH_HOSTS', 'findahelpline.com').split(',')
-        if host.strip()
-    ]
-    CLERK_PUBLISHABLE_KEY = os.getenv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', '').strip()
-    CLERK_SECRET_KEY = os.getenv('CLERK_SECRET_KEY', '').strip()
-    CLERK_CONFIGURED = bool(CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY)
-    ENABLE_DEMO_GOOGLE_AUTH = env_flag(
-        'KANSI_ENABLE_DEMO_GOOGLE_AUTH',
-        CLERK_CONFIGURED or ENV_NAME != 'production'
-    )
-
-
-class TestConfig(BaseConfig):
-    TESTING = True
-    DEBUG = False
-    WTF_CSRF_ENABLED = True
-    SECRET_KEY = os.getenv('KANSI_SECRET_KEY', 'test-secret-key')
-    SHOW_RESET_LINKS = True
-    SESSION_COOKIE_SECURE = False
-    ENABLE_DEMO_GOOGLE_AUTH = True
-    CLERK_CONFIGURED = True
+TRIGGER_PHRASES = [
+    "i want to kill myself", "i want to die", "i am going to end it",
+    "i want to end my life", "i am tired of life", "i want to commit suicide",
+    "i don't want to live anymore", "i wish i was dead", "life is not worth living",
+    "i am going to kill myself", "nobody would miss me", "the world is better without me",
+    "i have nothing to live for", "i want it all to end", "i can't go on anymore",
+    "i am planning to end it", "i just want the pain to stop", "i want to disappear forever",
+    "goodbye cruel world", "this is my last day",
+]

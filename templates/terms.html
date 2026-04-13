@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Terms & Conditions — Kansi AI{% endblock %}
+{% block content %}
+<div style="max-width:760px;margin:2rem auto;">
+    <h1>Terms & Conditions</h1>
+    <p style="color:var(--text-muted);margin-bottom:2rem;">Last updated: April 2026</p>
+    <div class="card" style="line-height:1.85;">
+        <h3 style="margin-bottom:0.75rem;">1. Nature of Service</h3>
+        <p>Kansi AI is an AI-powered mental health <strong>screening tool</strong>. It is <strong>not</strong> a replacement for professional therapy, counselling, or psychiatric care. Kansi AI does not diagnose mental health conditions. Users should always seek advice from a qualified human professional for clinical concerns.</p>
+
+        <h3 style="margin-top:1.5rem;margin-bottom:0.75rem;">2. Crisis Intervention Consent</h3>
+        <p>By creating an account and agreeing to these terms, you consent to the following: if Kansi AI detects language that suggests an <strong>imminent risk of self-harm or suicide</strong>, the system may automatically share your contact information (phone number and registered country) with the nearest crisis support hotline and/or emergency services. This process is designed to protect your safety and may occur <strong>without prior notification</strong> to avoid escalating distress. An administrator has 60 seconds to review and cancel false alerts before automatic escalation.</p>
+
+        <h3 style="margin-top:1.5rem;margin-bottom:0.75rem;">3. Data Privacy & Encryption</h3>
+        <p>All sensitive personal data — including email addresses, phone numbers, chat messages, and analysis text — is encrypted using Fernet symmetric encryption before storage. Passwords are salted and hashed using SHA-256. We do not sell, share, or expose your data to third parties except as described in Section 2 or as required by law.</p>
+
+        <h3 style="margin-top:1.5rem;margin-bottom:0.75rem;">4. AI Chatbot Disclaimer</h3>
+        <p>The Kansi AI chatbot is powered by a standalone natural language processing engine. It is not a human. It cannot provide medical advice, therapy, or crisis intervention. It is designed for supportive conversation, general questions, and emotional awareness. For any serious mental health concern, please contact a licensed professional.</p>
+
+        <h3 style="margin-top:1.5rem;margin-bottom:0.75rem;">5. Google Sign-In</h3>
+        <p>Google sign-in is facilitated through the Claude API for token verification. Your Google credentials are never stored on our servers. Only your email, name, and Google user ID are retained for account identification purposes.</p>
+
+        <h3 style="margin-top:1.5rem;margin-bottom:0.75rem;">6. User Responsibilities</h3>
+        <p>Users agree not to misuse the platform, submit malicious content, or attempt to circumvent security measures. Rate limiting is enforced on all endpoints. Users are responsible for the accuracy of their registration information, particularly phone numbers used for crisis contact.</p>
+
+        <h3 style="margin-top:1.5rem;margin-bottom:0.75rem;">7. Limitation of Liability</h3>
+        <p>Kansi AI and its creators are not liable for any decisions made based on AI-generated analysis. The tool provides probabilistic screening results, not clinical diagnoses. Users acknowledge and accept these limitations upon registration.</p>
+    </div>
+</div>
+{% endblock %}

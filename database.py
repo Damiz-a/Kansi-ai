@@ -1,311 +1,242 @@
-"""
-Kansi AI - Database Module
-===========================
-SQLite database for user management, sessions, analysis history,
-password reset workflows, and security event tracking.
-"""
-
-import json
-import os
 import sqlite3
-from datetime import datetime, timezone
-
-from argon2 import PasswordHasher
-from argon2.exceptions import InvalidHash, VerifyMismatchError
-
-DEFAULT_DB_PATH = (
-    os.path.join('/tmp', 'kansi_ai.db')
-    if os.getenv('VERCEL') == '1'
-    else os.path.join(os.path.dirname(__file__), 'data', 'kansi_ai.db')
-)
-
-DB_PATH = os.getenv('KANSI_DB_PATH', DEFAULT_DB_PATH)
-
-password_hasher = PasswordHasher()
-
-
-def utcnow():
-    return datetime.now(timezone.utc)
-
-
-def utcnow_iso():
-    return utcnow().isoformat()
+import hashlib
+import secrets
+import time
+from datetime import datetime
+from config import DATABASE_PATH, fernet, ADMIN_EMAIL, ADMIN_DEFAULT_PASSWORD
+import os
+import bleach
 
 
 def get_db():
-    """Get database connection."""
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    os.makedirs(os.path.dirname(DATABASE_PATH), exist_ok=True)
+    conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
 
-def ensure_column(conn, table_name, column_name, definition):
-    """Add a column if it does not exist."""
-    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-    existing = {row['name'] for row in rows}
-    if column_name not in existing:
-        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
-
-
 def init_db():
-    """Initialize the database schema."""
     conn = get_db()
-    cursor = conn.cursor()
+    c = conn.cursor()
 
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT,
-            full_name TEXT NOT NULL,
-            auth_provider TEXT DEFAULT 'email',
-            google_id TEXT UNIQUE,
-            profile_picture TEXT,
-            bio TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_login TIMESTAMP,
-            is_active BOOLEAN DEFAULT 1,
-            is_admin BOOLEAN DEFAULT 0
-        )
-    ''')
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email_encrypted TEXT UNIQUE NOT NULL,
+        email_hash TEXT UNIQUE NOT NULL,
+        password_hash TEXT,
+        full_name TEXT NOT NULL,
+        auth_provider TEXT DEFAULT 'email',
+        google_id TEXT UNIQUE,
+        phone_encrypted TEXT,
+        country_code TEXT DEFAULT 'GB',
+        bio TEXT,
+        role TEXT DEFAULT 'user',
+        is_active BOOLEAN DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
 
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            session_token TEXT UNIQUE NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            expires_at TIMESTAMP NOT NULL,
-            is_valid BOOLEAN DEFAULT 1,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-    ''')
+    c.execute('''CREATE TABLE IF NOT EXISTS analysis_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        input_text_encrypted TEXT NOT NULL,
+        prediction TEXT NOT NULL,
+        confidence REAL,
+        model_used TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )''')
 
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS analysis_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            input_text TEXT NOT NULL,
-            prediction TEXT NOT NULL,
-            confidence REAL,
-            model_used TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-    ''')
+    c.execute('''CREATE TABLE IF NOT EXISTS chat_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        role TEXT NOT NULL,
+        content_encrypted TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )''')
 
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_preferences (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER UNIQUE NOT NULL,
-            theme TEXT DEFAULT 'light',
-            notifications_enabled BOOLEAN DEFAULT 1,
-            language TEXT DEFAULT 'en',
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-    ''')
+    c.execute('''CREATE TABLE IF NOT EXISTS crisis_alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        trigger_phrase TEXT NOT NULL,
+        user_message_encrypted TEXT NOT NULL,
+        user_country TEXT,
+        user_phone_encrypted TEXT,
+        status TEXT DEFAULT 'pending',
+        admin_action TEXT,
+        auto_escalate_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        resolved_at TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )''')
 
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS password_reset_tokens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            token_hash TEXT UNIQUE NOT NULL,
-            created_at TIMESTAMP NOT NULL,
-            expires_at TIMESTAMP NOT NULL,
-            used_at TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-    ''')
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS security_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_type TEXT NOT NULL,
-            subject TEXT,
-            ip_address TEXT,
-            metadata TEXT,
-            created_at TIMESTAMP NOT NULL
-        )
-    ''')
-
-    ensure_column(conn, 'users', 'is_admin', 'BOOLEAN DEFAULT 0')
-    ensure_column(conn, 'users', 'is_active', 'BOOLEAN DEFAULT 1')
-
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_analysis_history_user_created ON analysis_history(user_id, created_at DESC)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_security_events_lookup ON security_events(event_type, subject, ip_address, created_at)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_password_reset_lookup ON password_reset_tokens(token_hash, expires_at, used_at)')
+    c.execute('''CREATE TABLE IF NOT EXISTS login_attempts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email_hash TEXT NOT NULL,
+        ip_address TEXT,
+        success BOOLEAN DEFAULT 0,
+        attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
 
     conn.commit()
+
+    admin = get_user_by_email(ADMIN_EMAIL)
+    if not admin:
+        create_user(ADMIN_EMAIL, ADMIN_DEFAULT_PASSWORD, "Admin - Kansi AI", role="admin")
+
     conn.close()
-    print("Database initialized successfully.")
+
+
+def encrypt(text):
+    if not text:
+        return None
+    return fernet.encrypt(text.encode()).decode()
+
+
+def decrypt(token):
+    if not token:
+        return None
+    try:
+        return fernet.decrypt(token.encode()).decode()
+    except Exception:
+        return "[decryption error]"
+
+
+def email_hash(email):
+    return hashlib.sha256(email.lower().strip().encode()).hexdigest()
 
 
 def hash_password(password):
-    """Hash password using Argon2id."""
-    return password_hasher.hash(password)
+    salt = secrets.token_hex(16)
+    pwd_hash = hashlib.sha256((salt + password).encode()).hexdigest()
+    return f"{salt}:{pwd_hash}"
 
 
 def verify_password(stored_hash, password):
-    """Verify a password against a stored hash."""
     if not stored_hash:
         return False
-
-    if stored_hash.startswith('$argon2'):
-        try:
-            return password_hasher.verify(stored_hash, password)
-        except (InvalidHash, VerifyMismatchError):
-            return False
-
-    # Legacy fallback for old SHA-256 salted hashes. They will be upgraded on login.
-    if ':' in stored_hash:
-        salt, pwd_hash = stored_hash.split(':', 1)
-        import hashlib
-        return hashlib.sha256((salt + password).encode()).hexdigest() == pwd_hash
-
-    return False
+    salt, pwd_hash = stored_hash.split(":")
+    return hashlib.sha256((salt + password).encode()).hexdigest() == pwd_hash
 
 
-def needs_password_rehash(stored_hash):
-    if not stored_hash or not stored_hash.startswith('$argon2'):
-        return True
-    try:
-        return password_hasher.check_needs_rehash(stored_hash)
-    except InvalidHash:
-        return True
+def sanitize(text, max_len=5000):
+    if not isinstance(text, str):
+        return ""
+    text = bleach.clean(text, tags=[], strip=True)
+    return text[:max_len].strip()
 
 
-def create_user(email, password, full_name, auth_provider='email', google_id=None, profile_picture=None, is_admin=False):
-    """Create a new user account."""
+def create_user(email, password, full_name, auth_provider="email", google_id=None, phone=None, country="GB", role="user"):
     conn = get_db()
     try:
-        password_hash = hash_password(password) if password else None
         conn.execute(
-            '''
-            INSERT INTO users (email, password_hash, full_name, auth_provider, google_id, profile_picture, is_admin)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''',
-            (email, password_hash, full_name, auth_provider, google_id, profile_picture, int(bool(is_admin)))
+            '''INSERT INTO users (email_encrypted, email_hash, password_hash, full_name,
+               auth_provider, google_id, phone_encrypted, country_code, role)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (encrypt(email.lower().strip()),
+             email_hash(email),
+             hash_password(password) if password else None,
+             sanitize(full_name, 100),
+             auth_provider,
+             google_id,
+             encrypt(phone) if phone else None,
+             sanitize(country, 5),
+             role)
         )
         conn.commit()
-        user = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
-        conn.execute('INSERT INTO user_preferences (user_id) VALUES (?)', (user['id'],))
-        conn.commit()
-        return dict(user)
+        user = conn.execute("SELECT * FROM users WHERE email_hash = ?", (email_hash(email),)).fetchone()
+        return dict(user) if user else None
     except sqlite3.IntegrityError:
         return None
     finally:
         conn.close()
 
 
-def update_user_password(user_id, password):
+def get_user_by_email(email):
     conn = get_db()
-    conn.execute(
-        'UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?',
-        (hash_password(password), utcnow_iso(), user_id)
-    )
-    conn.commit()
+    user = conn.execute("SELECT * FROM users WHERE email_hash = ?", (email_hash(email),)).fetchone()
     conn.close()
-
-
-def update_last_login(user_id):
-    conn = get_db()
-    conn.execute(
-        'UPDATE users SET last_login = ?, updated_at = ? WHERE id = ?',
-        (utcnow_iso(), utcnow_iso(), user_id)
-    )
-    conn.commit()
-    conn.close()
-
-
-def authenticate_user(email, password):
-    """Authenticate user with email and password."""
-    conn = get_db()
-    user = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
-    if not user or not user['password_hash']:
-        conn.close()
-        return None
-
-    if not verify_password(user['password_hash'], password):
-        conn.close()
-        return None
-
-    if needs_password_rehash(user['password_hash']):
-        conn.execute(
-            'UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?',
-            (hash_password(password), utcnow_iso(), user['id'])
-        )
-        conn.commit()
-        user = conn.execute('SELECT * FROM users WHERE id = ?', (user['id'],)).fetchone()
-
-    conn.close()
-    update_last_login(user['id'])
-    return dict(user)
+    if user:
+        u = dict(user)
+        u["email"] = decrypt(u["email_encrypted"])
+        u["phone"] = decrypt(u.get("phone_encrypted"))
+        return u
+    return None
 
 
 def get_user_by_id(user_id):
     conn = get_db()
-    user = conn.execute('SELECT * FROM users WHERE id = ?', (user_id,)).fetchone()
+    user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
     conn.close()
-    return dict(user) if user else None
+    if user:
+        u = dict(user)
+        u["email"] = decrypt(u["email_encrypted"])
+        u["phone"] = decrypt(u.get("phone_encrypted"))
+        return u
+    return None
 
 
-def get_user_by_email(email):
+def authenticate_user(email, password):
+    user = get_user_by_email(email)
+    if user and user["password_hash"] and verify_password(user["password_hash"], password):
+        return user
+    return None
+
+
+def check_login_lockout(email, ip, max_attempts, lockout_minutes):
     conn = get_db()
-    user = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
+    cutoff = time.time() - (lockout_minutes * 60)
+    cutoff_str = datetime.fromtimestamp(cutoff).strftime("%Y-%m-%d %H:%M:%S")
+    count = conn.execute(
+        "SELECT COUNT(*) FROM login_attempts WHERE email_hash = ? AND success = 0 AND attempted_at > ?",
+        (email_hash(email), cutoff_str)
+    ).fetchone()[0]
     conn.close()
-    return dict(user) if user else None
+    return count >= max_attempts
 
 
-def set_user_admin(user_id, is_admin=True):
+def record_login_attempt(email, ip, success):
     conn = get_db()
-    conn.execute(
-        'UPDATE users SET is_admin = ?, updated_at = ? WHERE id = ?',
-        (int(bool(is_admin)), utcnow_iso(), user_id)
-    )
+    conn.execute("INSERT INTO login_attempts (email_hash, ip_address, success) VALUES (?, ?, ?)",
+                 (email_hash(email), ip, 1 if success else 0))
+    if success:
+        conn.execute("DELETE FROM login_attempts WHERE email_hash = ? AND success = 0",
+                     (email_hash(email),))
     conn.commit()
     conn.close()
 
 
-def update_user_profile(user_id, full_name=None, bio=None, profile_picture=None):
-    """Update user profile information."""
+def update_user_profile(user_id, full_name=None, bio=None, phone=None, country=None):
     conn = get_db()
-    current = conn.execute(
-        'SELECT full_name, bio, profile_picture FROM users WHERE id = ?',
-        (user_id,)
-    ).fetchone()
-    if not current:
-        conn.close()
-        return
-
-    next_full_name = full_name if full_name else current['full_name']
-    next_bio = bio if bio is not None else current['bio']
-    next_picture = profile_picture if profile_picture else current['profile_picture']
-
-    conn.execute(
-        '''
-        UPDATE users
-        SET full_name = ?, bio = ?, profile_picture = ?, updated_at = ?
-        WHERE id = ?
-        ''',
-        (next_full_name, next_bio, next_picture, utcnow_iso(), user_id)
-    )
+    updates, values = [], []
+    if full_name:
+        updates.append("full_name = ?")
+        values.append(sanitize(full_name, 100))
+    if bio is not None:
+        updates.append("bio = ?")
+        values.append(sanitize(bio, 500))
+    if phone is not None:
+        updates.append("phone_encrypted = ?")
+        values.append(encrypt(phone))
+    if country:
+        updates.append("country_code = ?")
+        values.append(sanitize(country, 5))
+    updates.append("updated_at = ?")
+    values.append(datetime.now().isoformat())
+    values.append(user_id)
+    conn.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = ?", values)
     conn.commit()
     conn.close()
 
 
 def save_analysis(user_id, input_text, prediction, confidence, model_used):
-    """Save analysis result to history."""
     conn = get_db()
     conn.execute(
-        '''
-        INSERT INTO analysis_history (user_id, input_text, prediction, confidence, model_used)
-        VALUES (?, ?, ?, ?, ?)
-        ''',
-        (user_id, input_text, prediction, confidence, model_used)
-    )
+        "INSERT INTO analysis_history (user_id, input_text_encrypted, prediction, confidence, model_used) VALUES (?, ?, ?, ?, ?)",
+        (user_id, encrypt(input_text[:500]), prediction, confidence, model_used))
     conn.commit()
     conn.close()
 
@@ -313,97 +244,104 @@ def save_analysis(user_id, input_text, prediction, confidence, model_used):
 def get_analysis_history(user_id, limit=20):
     conn = get_db()
     rows = conn.execute(
-        '''
-        SELECT * FROM analysis_history WHERE user_id = ? ORDER BY created_at DESC LIMIT ?
-        ''',
-        (user_id, limit)
-    ).fetchall()
+        "SELECT * FROM analysis_history WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+        (user_id, limit)).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["input_text"] = decrypt(d["input_text_encrypted"])
+        result.append(d)
+    return result
 
 
-def create_password_reset_token(user_id, token_hash, expires_at):
+def save_chat(user_id, role, content):
     conn = get_db()
-    conn.execute(
-        '''
-        INSERT INTO password_reset_tokens (user_id, token_hash, created_at, expires_at)
-        VALUES (?, ?, ?, ?)
-        ''',
-        (user_id, token_hash, utcnow_iso(), expires_at)
-    )
+    conn.execute("INSERT INTO chat_history (user_id, role, content_encrypted) VALUES (?, ?, ?)",
+                 (user_id, role, encrypt(content[:2000])))
     conn.commit()
     conn.close()
 
 
-def get_password_reset_record(token_hash):
-    conn = get_db()
-    row = conn.execute(
-        '''
-        SELECT prt.*, users.email, users.full_name
-        FROM password_reset_tokens prt
-        JOIN users ON users.id = prt.user_id
-        WHERE prt.token_hash = ?
-        ''',
-        (token_hash,)
-    ).fetchone()
-    conn.close()
-    return dict(row) if row else None
-
-
-def mark_password_reset_used(token_hash):
-    conn = get_db()
-    conn.execute(
-        'UPDATE password_reset_tokens SET used_at = ? WHERE token_hash = ?',
-        (utcnow_iso(), token_hash)
-    )
-    conn.commit()
-    conn.close()
-
-
-def record_security_event(event_type, subject=None, ip_address=None, metadata=None):
-    conn = get_db()
-    conn.execute(
-        '''
-        INSERT INTO security_events (event_type, subject, ip_address, metadata, created_at)
-        VALUES (?, ?, ?, ?, ?)
-        ''',
-        (
-            event_type,
-            subject,
-            ip_address,
-            json.dumps(metadata or {}, sort_keys=True),
-            utcnow_iso()
-        )
-    )
-    conn.commit()
-    conn.close()
-
-
-def count_security_events(event_type, since_iso, subject=None, ip_address=None):
-    conn = get_db()
-    query = 'SELECT COUNT(*) AS count FROM security_events WHERE event_type = ? AND created_at >= ?'
-    params = [event_type, since_iso]
-    if subject is not None:
-        query += ' AND subject = ?'
-        params.append(subject)
-    if ip_address is not None:
-        query += ' AND ip_address = ?'
-        params.append(ip_address)
-    row = conn.execute(query, params).fetchone()
-    conn.close()
-    return int(row['count'])
-
-
-def get_recent_security_events(limit=20):
+def get_chat_history(user_id, limit=20):
     conn = get_db()
     rows = conn.execute(
-        'SELECT * FROM security_events ORDER BY created_at DESC LIMIT ?',
-        (limit,)
-    ).fetchall()
+        "SELECT * FROM chat_history WHERE user_id = ? ORDER BY created_at ASC LIMIT ?",
+        (user_id, limit)).fetchall()
     conn.close()
-    return [dict(row) for row in rows]
+    return [{"role": r["role"], "content": decrypt(r["content_encrypted"]), "created_at": r["created_at"]} for r in rows]
 
 
-if __name__ == '__main__':
+def create_crisis_alert(user_id, trigger_phrase, message, auto_escalate_at):
+    user = get_user_by_id(user_id)
+    conn = get_db()
+    conn.execute(
+        '''INSERT INTO crisis_alerts (user_id, trigger_phrase, user_message_encrypted,
+           user_country, user_phone_encrypted, auto_escalate_at)
+           VALUES (?, ?, ?, ?, ?, ?)''',
+        (user_id, trigger_phrase, encrypt(message[:1000]),
+         user.get("country_code", "GB") if user else "GB",
+         user.get("phone_encrypted") if user else None,
+         auto_escalate_at))
+    conn.commit()
+    conn.close()
+
+
+def get_pending_alerts():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM crisis_alerts WHERE status = 'pending' ORDER BY created_at DESC").fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["user_message"] = decrypt(d["user_message_encrypted"])
+        d["user_phone"] = decrypt(d.get("user_phone_encrypted"))
+        user = get_user_by_id(d["user_id"])
+        d["user_name"] = user["full_name"] if user else "Unknown"
+        d["user_email"] = user["email"] if user else "Unknown"
+        result.append(d)
+    return result
+
+
+def resolve_alert(alert_id, action):
+    conn = get_db()
+    conn.execute(
+        "UPDATE crisis_alerts SET status = ?, admin_action = ?, resolved_at = ? WHERE id = ?",
+        (action, action, datetime.now().isoformat(), alert_id))
+    conn.commit()
+    conn.close()
+
+
+def get_auto_escalate_alerts():
+    conn = get_db()
+    now = datetime.now().isoformat()
+    rows = conn.execute(
+        "SELECT * FROM crisis_alerts WHERE status = 'pending' AND auto_escalate_at <= ?",
+        (now,)).fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["user_message"] = decrypt(d["user_message_encrypted"])
+        d["user_phone"] = decrypt(d.get("user_phone_encrypted"))
+        result.append(d)
+    return result
+
+
+def get_all_users():
+    conn = get_db()
+    rows = conn.execute("SELECT * FROM users ORDER BY created_at DESC").fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["email"] = decrypt(d["email_encrypted"])
+        d["phone"] = decrypt(d.get("phone_encrypted"))
+        result.append(d)
+    return result
+
+
+if __name__ == "__main__":
     init_db()
-    print("Database setup complete.")
+    print("Database initialised.")

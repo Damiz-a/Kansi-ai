@@ -1,58 +1,21 @@
 {% extends "base.html" %}
-{% block title %}Kansi AI — A Safe Space for Mental Health Awareness{% endblock %}
-
+{% block title %}Kansi AI — Safe Space for Mental Health{% endblock %}
 {% block content %}
 <div class="hero">
     <h1>Welcome to <em>Kansi AI</em></h1>
     <p>A gentle, AI-powered companion that helps you understand the language of your emotions. Your words matter, and this is a safe space to explore them.</p>
     <div class="cta-buttons">
-        <a href="{{ url_for('register') }}" class="btn btn-primary" style="padding: 1rem 2.2rem; font-size: 1.05rem;">Begin Your Journey</a>
-        <a href="{{ url_for('about') }}" class="btn btn-outline" style="padding: 1rem 2.2rem; font-size: 1.05rem;">How It Works</a>
+        <a href="{{ url_for('register') }}" class="btn btn-primary" style="padding:1rem 2.2rem;font-size:1.05rem;">Begin Your Journey</a>
+        <a href="{{ url_for('about') }}" class="btn btn-outline" style="padding:1rem 2.2rem;font-size:1.05rem;">How It Works</a>
     </div>
 </div>
-
 <div class="support-banner breathe">
-    <span class="support-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 20s-6.5-4.1-8.6-8.1C1.7 8.8 3.1 5 7 5c2.1 0 3.4 1 5 2.8C13.6 6 14.9 5 17 5c3.9 0 5.3 3.8 3.6 6.9C18.5 15.9 12 20 12 20Z"/>
-        </svg>
-    </span>
-    <p>Whatever you're feeling right now is valid. Kansi AI is here to listen without judgement. If you're going through a difficult time, remember that reaching out for support is a sign of strength, not weakness.</p>
+    <span class="support-icon">💛</span>
+    <p>Whatever you're feeling right now is valid. Kansi AI is here to listen without judgement. Reaching out for support is a sign of strength.</p>
 </div>
-
 <div class="features">
-    <div class="card feature-card">
-        <span class="feature-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M7 18c3.5 0 6-2.3 6-6.2V6.5C8.5 6.5 6 9.6 6 13.7V18h1Z"/>
-                <path d="M13 17c3.2 0 5-2.2 5-5.6V8c-3.7 0-6 2.4-6 6.2V17h1Z"/>
-                <path d="M12 20v-6"/>
-            </svg>
-        </span>
-        <h3>Gentle Understanding</h3>
-        <p>Our AI gently analyses text for emotional patterns, helping identify when someone might be experiencing depressive indicators, always with care and compassion.</p>
-    </div>
-    <div class="card feature-card">
-        <span class="feature-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="5" y="10" width="14" height="10" rx="2"/>
-                <path d="M8 10V7.8C8 5.7 9.8 4 12 4s4 1.7 4 3.8V10"/>
-            </svg>
-        </span>
-        <h3>Your Privacy, Protected</h3>
-        <p>Your words stay safe. Encrypted storage, hashed passwords, and private analysis. Sign in with your email or Google account, your choice, your control.</p>
-    </div>
-    <div class="card feature-card">
-        <span class="feature-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M8.5 12.5 11 10l2 2 3.5-3.5"/>
-                <path d="M4 13.5 7.5 10c1.2-1.2 3.2-1.2 4.4 0l.1.1"/>
-                <path d="M20 10.5 16.5 14c-1.2 1.2-3.2 1.2-4.4 0l-.1-.1"/>
-                <path d="M3 16.5 6.5 20M17.5 4 21 7.5"/>
-            </svg>
-        </span>
-        <h3>A Bridge, Not a Replacement</h3>
-        <p>Kansi AI is a supportive screening tool, never a substitute for professional care. It gently guides you toward understanding, and toward help when needed.</p>
-    </div>
+    <div class="card feature-card"><span class="feature-icon">🌱</span><h3>Gentle Understanding</h3><p>Our AI analyses text for emotional patterns, helping identify when someone might need support — always with care and compassion.</p></div>
+    <div class="card feature-card"><span class="feature-icon">🔒</span><h3>Your Privacy, Protected</h3><p>Encrypted storage, hashed passwords, rate limiting, and input sanitisation. Your data is yours.</p></div>
+    <div class="card feature-card"><span class="feature-icon">🤝</span><h3>A Bridge, Not a Replacement</h3><p>Kansi AI is a supportive screening tool. For serious concerns, always speak with a real therapist.</p></div>
 </div>
 {% endblock %}
